@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, send_file
 import os
 import robocontratos
 
+# Use __name__ so Flask can locate resources relative to this file
 app = Flask(__name__)
 
 
