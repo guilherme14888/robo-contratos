@@ -7,18 +7,20 @@ Desenvolvido para resistir a desconexões e comportar-se como humano
 import os
 import time
 import random
-import pandas as pd
 import pyautogui as py
 from datetime import datetime
+import smtplib
+from email.message import EmailMessage
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (TimeoutException, 
-                                     NoSuchElementException, 
+from selenium.common.exceptions import (TimeoutException,
+                                     NoSuchElementException,
                                      WebDriverException,
                                      SessionNotCreatedException)
+from smtp_config import SMTPConfig
 
 # ==============================================
 # CONFIGURAÇÕES GERAIS
@@ -30,7 +32,6 @@ class Config:
     # Diretórios
     DOWNLOAD_DIR = r"C:\xampp\htdocs\embracon\Boleto"
     CONTRATOS_DIR = r"C:\xampp\htdocs\embracon\Contrato"
-    PLANILHA_PATH = r'C:\Users\Servidor_Cameras\Desktop\Vendas Consorcio Diaria.xlsx'
     
     # Credenciais
     USERNAME = "usecred.eireli@embracon.com.br"
@@ -464,30 +465,37 @@ class EmbraconAutomation:
         time.sleep(10)
 
 # ==============================================
+# FUNÇÃO DE EMAIL
+# ==============================================
+
+def enviar_email(destinatario: str, caminho_pdf: str, contrato: str) -> None:
+    """Envia o PDF gerado para o email informado."""
+    msg = EmailMessage()
+    msg['Subject'] = f'Boleto do contrato {contrato}'
+    msg['From'] = SMTPConfig.USERNAME
+    msg['To'] = destinatario
+    msg.set_content('Segue em anexo o boleto solicitado.')
+    with open(caminho_pdf, 'rb') as f:
+        msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename=os.path.basename(caminho_pdf))
+    with smtplib.SMTP(SMTPConfig.SERVER, SMTPConfig.PORT) as smtp:
+        smtp.starttls()
+        smtp.login(SMTPConfig.USERNAME, SMTPConfig.PASSWORD)
+        smtp.send_message(msg)
+
+# ==============================================
 # EXECUÇÃO PRINCIPAL
 # ==============================================
 
-def main():
-    """Função principal que orquestra a execução"""
+def main(contract: str, email_destino: str) -> str:
+    """Emite o boleto para o contrato informado e envia por email."""
     print("="*50)
     print("INICIANDO AUTOMAÇÃO EMBRACON - EMISSÃO DE BOLETOS")
     print("="*50)
-    
-    # Verificar/Criar diretórios necessários
+
     os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
     os.makedirs(Config.CONTRATOS_DIR, exist_ok=True)
     print("✅ Diretórios verificados/criados")
-    
-    # Carregar dados da planilha
-    try:
-        print("\n📊 Carregando dados da planilha...")
-        df = pd.read_excel(Config.PLANILHA_PATH)
-        contracts = df.iloc[:, 5].dropna().astype(str).str.replace(r"\.0$", "", regex=True)
-        print(f"✅ Total de contratos encontrados: {len(contracts)}")
-    except Exception as e:
-        print(f"🚨 Erro ao carregar planilha: {str(e)}")
-        return
-    
+
     # Inicializar navegador
     try:
         print("\n🖥️ Inicializando navegador...")
@@ -495,14 +503,14 @@ def main():
         automator = EmbraconAutomation(driver, wait)
     except Exception as e:
         print(f"🚨 Falha crítica ao iniciar navegador: {str(e)}")
-        return
-    
+        return ""
+
     # Executar fluxo principal
     try:
         print("\n🚀 Iniciando fluxo principal...")
         if automator.login():
             automator.navigate_to_billing()
-            automator.issue_billing(contracts)
+            automator.issue_billing([contract])
         else:
             print("🚫 Não foi possível fazer login após várias tentativas")
     except Exception as e:
@@ -513,5 +521,18 @@ def main():
         print("="*50)
         print("O navegador permanecerá aberto para verificação.")
 
+    pdf_path = os.path.join(Config.CONTRATOS_DIR, f"{contract}.pdf")
+    try:
+        enviar_email(email_destino, pdf_path, contract)
+        print(f"📧 Email enviado para {email_destino}")
+    except Exception as e:
+        print(f"⚠️ Falha ao enviar email: {e}")
+    return pdf_path
+
+
 if __name__ == "__main__":
-    main()
+    py.PAUSE = 0.1
+    py.FAILSAFE = True
+    contrato = input("Número do contrato: ")
+    email = input("E-mail para envio: ")
+    main(contrato, email)
